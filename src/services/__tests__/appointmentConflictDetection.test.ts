@@ -239,6 +239,48 @@ describe('detectConflicts — appointment buffer', () => {
     expect(result.conflicts[0].description).toContain('15 min');
   });
 
+  it('detects a weekly recurring appointment occurrence', async () => {
+    const recurring = makeAppt({
+      id: 'weekly-recurring',
+      date: '2026-06-01T10:00:00.000Z',
+      time: '10:00',
+      durationMinutes: 30,
+      recurrence: { frequency: 'weekly' },
+    });
+    mockGetInWindow.mockResolvedValue([]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [recurring], unreadableRows: 0 });
+
+    const result = await detectConflicts(
+      'pet-1',
+      new Date('2026-06-15T10:00:00.000Z'),
+      [],
+    );
+
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts[0].conflictingAppointment?.id).toBe('weekly-recurring');
+    expect(result.conflicts[0].description).toContain('Recurring');
+  });
+
+  it('respects the recurrence interval when no occurrence lands near the proposed time', async () => {
+    const recurring = makeAppt({
+      id: 'biweekly-recurring',
+      date: '2026-06-01T10:00:00.000Z',
+      time: '10:00',
+      durationMinutes: 30,
+      recurrence: { frequency: 'weekly', interval: 2 },
+    });
+    mockGetInWindow.mockResolvedValue([]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [recurring], unreadableRows: 0 });
+
+    const result = await detectConflicts(
+      'pet-1',
+      new Date('2026-06-08T10:00:00.000Z'),
+      [],
+    );
+
+    expect(result.hasConflicts).toBe(false);
+  });
+
   it('does not flag an appointment outside the 1-hour buffer', async () => {
     // 90 min away is outside the buffer
     const ninetyMinLater = new Date(BASE_TIME.getTime() + 90 * 60_000);
