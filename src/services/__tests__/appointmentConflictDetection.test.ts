@@ -191,6 +191,20 @@ describe('detectConflicts — appointment buffer', () => {
     expect(result.hasConflicts).toBe(true);
   });
 
+  it('ignores legacy lowercase cancelled appointments during conflict checks', async () => {
+    const cancelled = makeAppt({
+      id: 'legacy-cancelled',
+      date: BASE_TIME.toISOString(),
+      status: 'cancelled' as Appointment['status'],
+    });
+    mockGetInWindow.mockResolvedValue([]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [cancelled], unreadableRows: 0 });
+
+    const result = await detectConflicts('pet-1', BASE_TIME, []);
+    expect(result.hasConflicts).toBe(false);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
   it('flags back-to-back appointments as a warning even when only local records include the appointment', async () => {
     const existing = makeAppt({
       id: 'back-to-back',
