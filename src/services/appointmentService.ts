@@ -160,8 +160,11 @@ function detectConflictsInAppointments(
       proposedInterval,
       appointmentBufferMs,
     )) {
+      const overlaps =
+        apptInterval.startMs < proposedInterval.endMs &&
+        proposedInterval.startMs < apptInterval.endMs;
       const gapMs = getIntervalGapMs(apptInterval, proposedInterval);
-      if (gapMs > appointmentBufferMs) continue;
+      if (!overlaps && (appointmentBufferMs === 0 || gapMs > appointmentBufferMs)) continue;
 
       const recurringOccurrence =
         appt.recurrence !== undefined && apptInterval.startMs !== baseStartMs;
