@@ -152,7 +152,7 @@ function detectConflictsInAppointments(
 
   for (const appt of appointmentCandidates) {
     if (excludeId && appt.id === excludeId) continue;
-    if (appt.status === AppointmentStatus.CANCELLED) continue;
+    if (String(appt.status).toLowerCase() === AppointmentStatus.CANCELLED.toLowerCase()) continue;
 
     const baseStartMs = getAppointmentInterval(appt).startMs;
     for (const apptInterval of getAppointmentIntervalsNear(
