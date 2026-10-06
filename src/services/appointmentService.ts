@@ -12,7 +12,7 @@ import {
 } from './localDB';
 import { getScheduleForRange } from './medicationService';
 import { AppointmentStatus } from '../models/Appointment';
-import type { Appointment } from '../models/Appointment';
+import type { Appointment, AppointmentRecurrence } from '../models/Appointment';
 import type { Medication } from '../models/Medication';
 
 // ─── Re-exports ───────────────────────────────────────────────────────────────
@@ -154,14 +154,25 @@ function detectConflictsInAppointments(
     if (excludeId && appt.id === excludeId) continue;
     if (appt.status === AppointmentStatus.CANCELLED) continue;
 
-    const apptInterval = getAppointmentInterval(appt);
-    const gapMs = getIntervalGapMs(apptInterval, proposedInterval);
-    if (gapMs <= appointmentBufferMs) {
+    const baseStartMs = getAppointmentInterval(appt).startMs;
+    for (const apptInterval of getAppointmentIntervalsNear(
+      appt,
+      proposedInterval,
+      appointmentBufferMs,
+    )) {
+      const gapMs = getIntervalGapMs(apptInterval, proposedInterval);
+      if (gapMs > appointmentBufferMs) continue;
+
+      const recurringOccurrence =
+        appt.recurrence !== undefined && apptInterval.startMs !== baseStartMs;
       conflicts.push({
         type: 'appointment',
-        description: `"${appt.title ?? 'Appointment'}" is scheduled ${_formatTimeDiff(gapMs)} from the proposed time.`,
+        description: recurringOccurrence
+          ? `Recurring "${appt.title ?? 'Appointment'}" is scheduled ${_formatTimeDiff(gapMs)} from the proposed time.`
+          : `"${appt.title ?? 'Appointment'}" is scheduled ${_formatTimeDiff(gapMs)} from the proposed time.`,
         conflictingAppointment: appt,
       });
+      break;
     }
   }
 
@@ -486,6 +497,121 @@ function getAppointmentInterval(appt: Appointment): AppointmentInterval {
     startMs: start.getTime(),
     endMs: start.getTime() + durationMinutes * 60_000,
   };
+}
+
+function getAppointmentIntervalsNear(
+  appt: Appointment,
+  proposedInterval: AppointmentInterval,
+  appointmentBufferMs: number,
+): AppointmentInterval[] {
+  const baseInterval = getAppointmentInterval(appt);
+  const recurrence = appt.recurrence;
+  if (!recurrence) return [baseInterval];
+
+  const interval =
+    Number.isInteger(recurrence.interval) && (recurrence.interval ?? 0) > 0
+      ? recurrence.interval!
+      : 1;
+  const count =
+    recurrence.count === undefined
+      ? undefined
+      : Number.isInteger(recurrence.count) && recurrence.count > 0
+        ? recurrence.count
+        : 1;
+  const untilMs =
+    recurrence.until && /^\d{4}-\d{2}-\d{2}$/.test(recurrence.until)
+      ? new Date(`${recurrence.until}T23:59:59.999`).getTime()
+      : undefined;
+  const durationMs = baseInterval.endMs - baseInterval.startMs;
+  const windowStartMs = proposedInterval.startMs - appointmentBufferMs - durationMs;
+  const windowEndMs = proposedInterval.endMs + appointmentBufferMs;
+  const baseStart = new Date(baseInterval.startMs);
+  const candidates = new Set<number>([0]);
+
+  const addNearbyIndexes = (targetMs: number) => {
+    const approximate = approximateRecurrenceIndex(baseStart, targetMs, recurrence, interval);
+    for (let offset = -2; offset <= 2; offset++) {
+      candidates.add(Math.max(0, approximate + offset));
+    }
+  };
+
+  addNearbyIndexes(windowStartMs);
+  addNearbyIndexes(proposedInterval.startMs);
+  addNearbyIndexes(windowEndMs);
+  if (untilMs !== undefined && Number.isFinite(untilMs)) addNearbyIndexes(untilMs);
+  if (count !== undefined) candidates.add(Math.max(0, count - 1));
+
+  const intervals: AppointmentInterval[] = [];
+  const seenStarts = new Set<number>();
+  for (const occurrenceIndex of [...candidates].sort((a, b) => a - b)) {
+    if (count !== undefined && occurrenceIndex >= count) continue;
+    const start = recurrenceStartAt(baseStart, recurrence, interval, occurrenceIndex);
+    const startMs = start.getTime();
+    if (!Number.isFinite(startMs) || seenStarts.has(startMs)) continue;
+    if (occurrenceIndex > 0 && untilMs !== undefined && startMs > untilMs) continue;
+    if (
+      occurrenceIndex > 0 &&
+      (startMs > windowEndMs || startMs + durationMs < windowStartMs)
+    ) {
+      continue;
+    }
+
+    seenStarts.add(startMs);
+    intervals.push({ startMs, endMs: startMs + durationMs });
+  }
+
+  return intervals.length > 0 ? intervals : [baseInterval];
+}
+
+function approximateRecurrenceIndex(
+  baseStart: Date,
+  targetMs: number,
+  recurrence: AppointmentRecurrence,
+  interval: number,
+): number {
+  if (targetMs <= baseStart.getTime()) return 0;
+  if (recurrence.frequency === 'daily' || recurrence.frequency === 'weekly') {
+    const daysPerOccurrence = recurrence.frequency === 'daily' ? interval : interval * 7;
+    return Math.max(
+      0,
+      Math.floor(
+        (targetMs - baseStart.getTime()) / (daysPerOccurrence * 24 * 60 * 60 * 1000),
+      ),
+    );
+  }
+
+  const target = new Date(targetMs);
+  const monthDelta =
+    (target.getFullYear() - baseStart.getFullYear()) * 12 +
+    target.getMonth() -
+    baseStart.getMonth();
+  return Math.max(0, Math.floor(monthDelta / interval));
+}
+
+function recurrenceStartAt(
+  baseStart: Date,
+  recurrence: AppointmentRecurrence,
+  interval: number,
+  occurrenceIndex: number,
+): Date {
+  const next = new Date(baseStart);
+  const step = interval * occurrenceIndex;
+
+  if (recurrence.frequency === 'daily') {
+    next.setDate(next.getDate() + step);
+    return next;
+  }
+  if (recurrence.frequency === 'weekly') {
+    next.setDate(next.getDate() + step * 7);
+    return next;
+  }
+
+  const originalDay = next.getDate();
+  next.setDate(1);
+  next.setMonth(next.getMonth() + step);
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(originalDay, lastDay));
+  return next;
 }
 
 function getIntervalGapMs(a: AppointmentInterval, b: AppointmentInterval): number {
