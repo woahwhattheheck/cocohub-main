@@ -308,6 +308,43 @@ export function isReadableAppointmentForConflicts(value: unknown): boolean {
   ) {
     return false;
   }
+  const recurrence = appointment.recurrence;
+  if (recurrence !== undefined) {
+    if (typeof recurrence !== 'object' || recurrence === null || Array.isArray(recurrence)) {
+      return false;
+    }
+    const rule = recurrence as Record<string, unknown>;
+    const supportedRecurrenceFrequencies = new Set(['daily', 'weekly', 'monthly']);
+    if (
+      typeof rule.frequency !== 'string' ||
+      !supportedRecurrenceFrequencies.has(rule.frequency)
+    ) {
+      return false;
+    }
+    if (
+      rule.interval !== undefined &&
+      (typeof rule.interval !== 'number' ||
+        !Number.isInteger(rule.interval) ||
+        rule.interval <= 0)
+    ) {
+      return false;
+    }
+    if (
+      rule.count !== undefined &&
+      (typeof rule.count !== 'number' || !Number.isInteger(rule.count) || rule.count <= 0)
+    ) {
+      return false;
+    }
+    if (rule.until !== undefined) {
+      if (typeof rule.until !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(rule.until)) {
+        return false;
+      }
+      if (!Number.isFinite(new Date(`${rule.until}T00:00:00`).getTime())) {
+        return false;
+      }
+    }
+  }
+
   let start: Date;
   if (appointment.date.includes('T')) {
     start = new Date(appointment.date);
