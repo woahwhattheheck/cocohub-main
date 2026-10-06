@@ -30,7 +30,7 @@ import {
 jest.mock('../localDB', () => ({
   getAppointmentsInWindow: jest.fn().mockResolvedValue([]),
   getAllLocalAppointments: jest.fn().mockResolvedValue([]),
-  getAllAppointmentsByPetId: jest.fn().mockResolvedValue([]),
+  getAppointmentSnapshotByPetId: jest.fn().mockResolvedValue({ appointments: [], unreadableRows: 0 }),
   upsertAppointment: jest.fn().mockResolvedValue(undefined),
   deleteAppointmentById: jest.fn().mockResolvedValue(undefined),
   getItem: jest.fn().mockResolvedValue(null),
@@ -60,7 +60,7 @@ jest.mock('../medicationService', () => ({
 
 import {
   getAppointmentsInWindow,
-  getAllAppointmentsByPetId,
+  getAppointmentSnapshotByPetId,
   upsertAppointment,
   deleteAppointmentById,
   getAllLocalAppointments,
@@ -70,8 +70,8 @@ import { getScheduleForRange } from '../medicationService';
 const mockGetInWindow = getAppointmentsInWindow as jest.MockedFunction<
   typeof getAppointmentsInWindow
 >;
-const mockGetAllByPet = getAllAppointmentsByPetId as jest.MockedFunction<
-  typeof getAllAppointmentsByPetId
+const mockGetSnapshot = getAppointmentSnapshotByPetId as jest.MockedFunction<
+  typeof getAppointmentSnapshotByPetId
 >;
 const mockUpsert = upsertAppointment as jest.MockedFunction<typeof upsertAppointment>;
 const mockDeleteById = deleteAppointmentById as jest.MockedFunction<typeof deleteAppointmentById>;
@@ -83,7 +83,7 @@ const mockGetSchedule = getScheduleForRange as jest.MockedFunction<typeof getSch
 const BASE_TIME = new Date('2026-06-15T10:00:00.000Z');
 
 beforeEach(() => {
-  mockGetAllByPet.mockResolvedValue([]);
+  mockGetSnapshot.mockResolvedValue({ appointments: [], unreadableRows: 0 });
 });
 
 const makeAppt = (overrides: Partial<Appointment> = {}): Appointment => ({
@@ -200,7 +200,7 @@ describe('detectConflicts — appointment buffer', () => {
     });
     const proposed = new Date('2026-06-15T10:30:00.000Z');
     mockGetInWindow.mockResolvedValue([]);
-    mockGetAllByPet.mockResolvedValue([existing]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [existing], unreadableRows: 0 });
 
     const result = await detectConflicts('pet-1', proposed, []);
     expect(result.hasConflicts).toBe(true);
@@ -216,7 +216,7 @@ describe('detectConflicts — appointment buffer', () => {
     });
     const proposed = new Date('2026-06-16T00:45:00.000Z');
     mockGetInWindow.mockResolvedValue([]);
-    mockGetAllByPet.mockResolvedValue([overnight]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [overnight], unreadableRows: 0 });
 
     const result = await detectConflicts('pet-1', proposed, []);
     expect(result.hasConflicts).toBe(true);
@@ -232,7 +232,7 @@ describe('detectConflicts — appointment buffer', () => {
     });
     const proposed = new Date('2026-06-16T01:15:00.000Z');
     mockGetInWindow.mockResolvedValue([]);
-    mockGetAllByPet.mockResolvedValue([overnight]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [overnight], unreadableRows: 0 });
 
     const result = await detectConflicts('pet-1', proposed, []);
     expect(result.hasConflicts).toBe(true);
@@ -336,14 +336,13 @@ describe('findNextAvailableSlot', () => {
       id: 'b2',
       date: new Date(BASE_TIME.getTime() + 2 * CONFLICT_BUFFER_MS).toISOString(),
     });
-    // First two candidate slots are blocked, third is free
-    mockGetInWindow
-      .mockResolvedValueOnce([firstBlock]) // +1h blocked
-      .mockResolvedValueOnce([secondBlock]) // +2h blocked
-      .mockResolvedValue([]); // +3h free
+    mockGetSnapshot.mockResolvedValue({
+      appointments: [firstBlock, secondBlock],
+      unreadableRows: 0,
+    });
 
     const slot = await findNextAvailableSlot('pet-1', BASE_TIME, []);
-    expect(slot?.getTime()).toBe(BASE_TIME.getTime() + 3 * CONFLICT_BUFFER_MS);
+    expect(slot?.getTime()).toBe(BASE_TIME.getTime() + 4 * CONFLICT_BUFFER_MS);
   });
 });
 
