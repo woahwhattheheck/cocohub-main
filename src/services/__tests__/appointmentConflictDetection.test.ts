@@ -221,6 +221,22 @@ describe('detectConflicts — appointment buffer', () => {
     expect(result.conflicts[0].conflictingAppointment?.id).toBe('back-to-back');
   });
 
+  it('allows a touching appointment boundary when the configured buffer is zero', async () => {
+    const existing = makeAppt({
+      id: 'zero-buffer-boundary',
+      date: '2026-06-15T10:00:00.000Z',
+      time: '10:00',
+      durationMinutes: 30,
+    });
+    const proposed = new Date('2026-06-15T10:30:00.000Z');
+    mockGetInWindow.mockResolvedValue([]);
+    mockGetSnapshot.mockResolvedValue({ appointments: [existing], unreadableRows: 0 });
+
+    const result = await detectConflicts('pet-1', proposed, [], undefined, false, 0, 30);
+    expect(result.hasConflicts).toBe(false);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
   it('detects an appointment that spans midnight and overlaps the proposed time', async () => {
     const overnight = makeAppt({
       id: 'overnight',
