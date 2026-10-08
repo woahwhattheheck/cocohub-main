@@ -17,6 +17,7 @@ import {
   findNextAvailableSlot,
   saveAppointment,
   getAppointments,
+  getUpcomingAppointments,
   deleteAppointment,
   getUpcoming,
   getPast,
@@ -30,6 +31,7 @@ import {
 jest.mock('../localDB', () => ({
   getAppointmentsInWindow: jest.fn().mockResolvedValue([]),
   getAllLocalAppointments: jest.fn().mockResolvedValue([]),
+  getAllAppointmentsByPetId: jest.fn().mockResolvedValue([]),
   getAppointmentSnapshotByPetId: jest.fn().mockResolvedValue({ appointments: [], unreadableRows: 0 }),
   upsertAppointment: jest.fn().mockResolvedValue(undefined),
   deleteAppointmentById: jest.fn().mockResolvedValue(undefined),
@@ -64,7 +66,9 @@ import {
   upsertAppointment,
   deleteAppointmentById,
   getAllLocalAppointments,
+  getAllAppointmentsByPetId,
 } from '../localDB';
+import apiClient from '../apiClient';
 import { getScheduleForRange } from '../medicationService';
 
 const mockGetInWindow = getAppointmentsInWindow as jest.MockedFunction<
@@ -76,6 +80,8 @@ const mockGetSnapshot = getAppointmentSnapshotByPetId as jest.MockedFunction<
 const mockUpsert = upsertAppointment as jest.MockedFunction<typeof upsertAppointment>;
 const mockDeleteById = deleteAppointmentById as jest.MockedFunction<typeof deleteAppointmentById>;
 const mockGetAll = getAllLocalAppointments as jest.MockedFunction<typeof getAllLocalAppointments>;
+const mockGetByPet = getAllAppointmentsByPetId as jest.MockedFunction<typeof getAllAppointmentsByPetId>;
+const mockApiGet = apiClient.get as jest.Mock;
 const mockGetSchedule = getScheduleForRange as jest.MockedFunction<typeof getScheduleForRange>;
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -499,6 +505,45 @@ describe('saveAppointment — conflict resolution note', () => {
     await saveAppointment(appt);
 
     expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({ notes: 'Original note' }));
+  });
+});
+
+// ─── getUpcomingAppointments — ISO and same-day offline booking ───────────────
+
+describe('getUpcomingAppointments — stored appointment interval', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-08T06:00:00.000Z'));
+    mockApiGet.mockRejectedValue(new Error('offline'));
+    mockGetByPet.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  it('keeps and sorts upcoming ISO timestamps from the API without appending another time', async () => {
+    const later = makeAppt({ id: 'api-later', date: '2026-10-08T17:00:00.000Z', time: '13:00' });
+    const earlier = makeAppt({ id: 'api-earlier', date: '2026-10-08T14:30:00.000Z', time: '10:30' });
+    const past = makeAppt({ id: 'api-past', date: '2026-10-07T14:30:00.000Z' });
+    const cancelled = makeAppt({ id: 'api-cancelled', date: later.date, status: 'CANCELLED' as Appointment['status'] });
+    mockApiGet.mockResolvedValueOnce({ data: { data: [later, past, cancelled, earlier] } });
+
+    const result = await getUpcomingAppointments('pet-1');
+    expect(result.map((appt) => appt.id)).toEqual(['api-earlier', 'api-later']);
+    expect(mockUpsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves same-day future local HH:mm appointments instead of comparing midnight', async () => {
+    const evening = makeAppt({ id: 'local-evening', date: '2026-10-08', time: '18:00' });
+    const morning = makeAppt({ id: 'local-morning', date: '2026-10-08', time: '01:00' });
+    const cancelled = makeAppt({ id: 'local-cancelled', date: '2026-10-08', time: '20:00', status: 'cancelled' as Appointment['status'] });
+    mockGetByPet.mockResolvedValue([morning, cancelled, evening]);
+
+    const result = await getUpcomingAppointments('pet-1');
+    expect(result.map((appt) => appt.id)).toEqual(['local-evening']);
+    expect(mockGetByPet).toHaveBeenCalledWith('pet-1');
   });
 });
 
