@@ -512,6 +512,7 @@ describe('saveAppointment — conflict resolution note', () => {
 
 describe('getUpcomingAppointments — stored appointment interval', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-10-08T06:00:00.000Z'));
     mockApiGet.mockRejectedValue(new Error('offline'));
