@@ -364,6 +364,50 @@ describe('detectConflicts — vet-supervised medication', () => {
     expect(result.conflicts[0].medicationName).toBe('Amoxicillin');
   });
 
+  it('checks the full two-hour appointment for supervised medication doses', async () => {
+    const med = makeMed({ instructions: 'Vet injection required' });
+    const dose = new Date(BASE_TIME.getTime() + 90 * 60_000);
+    // The schedule helper honors its requested date range. A start-only
+    // plus/minus-one-hour lookup would omit this legitimate in-visit dose.
+    mockGetSchedule.mockImplementation((_med, from, to) =>
+      dose >= from && dose <= to ? [dose] : [],
+    );
+
+    const result = await detectConflicts('pet-1', BASE_TIME, [med], undefined, false, 30, 120);
+    expect(mockGetSchedule).toHaveBeenCalledWith(
+      med,
+      new Date(BASE_TIME.getTime() - CONFLICT_BUFFER_MS),
+      new Date(BASE_TIME.getTime() + 120 * 60_000 + CONFLICT_BUFFER_MS),
+    );
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts[0].type).toBe('medication');
+    expect(result.conflicts[0].medicationTime).toEqual(dose);
+  });
+
+  it('preserves a one-hour warning after the end of a long appointment', async () => {
+    const med = makeMed({ instructions: 'Vet injection required' });
+    const dose = new Date(BASE_TIME.getTime() + 150 * 60_000); // 30m after 2h visit
+    mockGetSchedule.mockImplementation((_med, from, to) =>
+      dose >= from && dose <= to ? [dose] : [],
+    );
+
+    const result = await detectConflicts('pet-1', BASE_TIME, [med], undefined, false, 30, 120);
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts[0].type).toBe('medication');
+  });
+
+  it('does not warn for a supervised dose more than one hour after the visit ends', async () => {
+    const med = makeMed({ instructions: 'Vet injection required' });
+    const dose = new Date(BASE_TIME.getTime() + 210 * 60_000); // 90m after visit
+    mockGetSchedule.mockImplementation((_med, from, to) =>
+      dose >= from && dose <= to ? [dose] : [],
+    );
+
+    const result = await detectConflicts('pet-1', BASE_TIME, [med], undefined, false, 30, 120);
+    expect(result.hasConflicts).toBe(false);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
   it('ignores non-supervised medication doses', async () => {
     const med = makeMed({ instructions: 'Give with food twice daily' });
     mockGetSchedule.mockReturnValue([BASE_TIME]); // dose falls in window
