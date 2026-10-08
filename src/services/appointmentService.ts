@@ -313,27 +313,30 @@ export async function getUpcomingAppointments(petId: string): Promise<Appointmen
 }
 
 export function getUpcoming(appointments: Appointment[]): Appointment[] {
-  const now = new Date();
+  const nowMs = Date.now();
   return appointments
     .filter((a) => {
-      const d = new Date(a.date);
+      const startMs = getAppointmentInterval(a).startMs;
       return (
-        d >= now && a.status !== AppointmentStatus.CANCELLED && (a.status as string) !== 'cancelled'
+        Number.isFinite(startMs) &&
+        startMs >= nowMs &&
+        String(a.status).toLowerCase() !== AppointmentStatus.CANCELLED.toLowerCase()
       );
     })
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .sort((a, b) => getAppointmentInterval(a).startMs - getAppointmentInterval(b).startMs);
 }
 
 export function getPast(appointments: Appointment[]): Appointment[] {
-  const now = new Date();
+  const nowMs = Date.now();
   return appointments
     .filter((a) => {
-      const d = new Date(a.date);
+      const startMs = getAppointmentInterval(a).startMs;
       return (
-        d < now || a.status === AppointmentStatus.CANCELLED || (a.status as string) === 'cancelled'
+        (Number.isFinite(startMs) && startMs < nowMs) ||
+        String(a.status).toLowerCase() === AppointmentStatus.CANCELLED.toLowerCase()
       );
     })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort((a, b) => getAppointmentInterval(b).startMs - getAppointmentInterval(a).startMs);
 }
 
 export async function saveAppointment(
@@ -443,7 +446,8 @@ export async function scheduleAppointmentReminders(
 ): Promise<[string | null, string | null]> {
   const { scheduleAppointmentNotification } = await import('./notificationService');
 
-  const apptMs = new Date(`${appointment.date}T${appointment.time ?? '00:00'}:00`).getTime();
+  // Appointment.date may already contain a complete ISO instant; never append another time.
+  const apptMs = getAppointmentInterval(appointment).startMs;
   const now = Date.now();
 
   const title = appointment.title ?? appointment.notes ?? 'Vet Appointment';
