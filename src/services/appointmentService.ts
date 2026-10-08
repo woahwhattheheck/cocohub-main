@@ -179,18 +179,27 @@ function detectConflictsInAppointments(
     }
   }
 
-  const windowStartDate = new Date(proposedTime.getTime() - CONFLICT_BUFFER_MS);
-  const windowEndDate = new Date(proposedTime.getTime() + CONFLICT_BUFFER_MS);
+  // A vet-supervised dose conflicts when it falls anywhere inside the
+  // appointment, not just within one hour of the appointment's start.
+  // Retain the existing one-hour proximity warning on BOTH sides.
+  const windowStartDate = new Date(proposedInterval.startMs - CONFLICT_BUFFER_MS);
+  const windowEndDate = new Date(proposedInterval.endMs + CONFLICT_BUFFER_MS);
 
   for (const med of medications) {
     if (!isVetSupervised(med)) continue;
     const doseTimes = getScheduleForRange(med, windowStartDate, windowEndDate);
     for (const doseTime of doseTimes) {
-      const diffMs = Math.abs(doseTime.getTime() - proposedTime.getTime());
+      const doseMs = doseTime.getTime();
+      const diffMs =
+        doseMs < proposedInterval.startMs
+          ? proposedInterval.startMs - doseMs
+          : doseMs > proposedInterval.endMs
+            ? doseMs - proposedInterval.endMs
+            : 0;
       if (diffMs <= CONFLICT_BUFFER_MS) {
         conflicts.push({
           type: 'medication',
-          description: `"${med.name}" requires vet supervision at ${_formatTime(doseTime)} (within ${_formatTimeDiff(diffMs)} of the proposed time).`,
+          description: `"${med.name}" requires vet supervision at ${_formatTime(doseTime)} (within ${_formatTimeDiff(diffMs)} of the proposed appointment).`,
           medicationName: med.name,
           medicationTime: doseTime,
         });
