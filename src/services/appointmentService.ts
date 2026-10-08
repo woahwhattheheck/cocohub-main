@@ -285,19 +285,30 @@ export async function getUpcomingAppointments(petId: string): Promise<Appointmen
     );
     const now = new Date();
     const upcoming = response.data.data
-      .filter((a) => new Date(`${a.date}T${a.time}`) >= now)
-      .sort(
-        (a, b) =>
-          new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime(),
-      );
+      .filter((a) => {
+        const startMs = getAppointmentInterval(a).startMs;
+        return (
+          Number.isFinite(startMs) &&
+          startMs >= now.getTime() &&
+          String(a.status).toLowerCase() !== AppointmentStatus.CANCELLED.toLowerCase()
+        );
+      })
+      .sort((a, b) => getAppointmentInterval(a).startMs - getAppointmentInterval(b).startMs);
     await Promise.all(upcoming.map((a) => upsertAppointment(a)));
     return upcoming;
   } catch {
     const local = await getAllAppointmentsByPetId<Appointment>(petId);
     const now = new Date();
     return local
-      .filter((a) => new Date(a.date) >= now && a.status !== AppointmentStatus.CANCELLED)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .filter((a) => {
+        const startMs = getAppointmentInterval(a).startMs;
+        return (
+          Number.isFinite(startMs) &&
+          startMs >= now.getTime() &&
+          String(a.status).toLowerCase() !== AppointmentStatus.CANCELLED.toLowerCase()
+        );
+      })
+      .sort((a, b) => getAppointmentInterval(a).startMs - getAppointmentInterval(b).startMs);
   }
 }
 
